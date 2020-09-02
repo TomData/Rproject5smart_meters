@@ -1,0 +1,448 @@
+---
+title: "Shiny First App"
+author: Thomas Schneider - Data Analyst
+output: 
+  ioslides_presentation:
+    background: white
+    smaller: yes
+    widescreen: yes
+    css: maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css
+---
+
+```{r}
+# libraries ---------------------------------------------------------------
+if(require("pacman")=="FALSE"){
+  install.packages("pacman")
+}
+
+pacman::p_load(tidyverse, lubridate, forecast, shiny, shinydashboard, dplyr)# load 
+```
+
+```{r}
+library(dplyr)
+```
+
+
+```{r}
+# load data ---------------------------------------------------------------
+library(readr)
+Data <- read_delim("C:/Users/Thomas S/Documents/Ubiqum/3. IoT Analytics/1. Domain Research and Exploratory Data Analysis/Data/household_power_consumption.txt", 
+    ";", col_types = cols(Date = col_date(format = "%d/%m/%Y")))
+```
+
+```{r}
+Data <- Data %>% 
+  unite(Date, Time, col = "Datetime", sep = " ") %>% 
+  mutate(date_time = parse_datetime(Datetime, locale = locale(tz = "UTC")))
+```
+
+```{r}
+dayData <- Data %>%
+  group_by(year=year(date_time),
+           month=month(date_time),
+           day=day(date_time)) %>%
+  summarise(day_energy_avg = mean(Global_active_power, na.rm = TRUE)) %>% 
+  ungroup()
+```
+
+```{r}
+# train model -------------------------------------------------------------
+ts_dayData <- ts(dayData$day_energy_avg,
+                   frequency = 365.25,
+                   start = c(2007, 1))
+
+linearmodel <- tslm(ts_dayData ~ trend + season)
+
+write_rds(linearmodel,"C:/Users/Thomas S/Documents/Ubiqum/3. IoT Analytics/2. Visualize and Analyze Energy Data/Shiny/Shiny/Shiny2/Data 2/lm_Shiny.rds")
+
+
+linearmodel <- read_rds("C:/Users/Thomas S/Documents/Ubiqum/3. IoT Analytics/2. Visualize and Analyze Energy Data/Shiny/Shiny/Shiny2/Data 2/lm_Shiny.rds")
+```
+
+```{r}
+SubData <- Data %>%
+  group_by(year=year(Datetime),
+           month=month(Datetime),
+           day=day(Datetime),
+           hour=hour(Datetime)) %>%
+  summarise(sub1_avg = mean(Sub_metering_1, na.rm = TRUE),
+            sub2_avg = mean(Sub_metering_2, na.rm = TRUE),
+            sub3_avg = mean(Sub_metering_3, na.rm = TRUE),) %>% 
+  ungroup()
+
+#merge the  year,month,day,hour columns to one column so that comparison(later can be made)
+SubData <- SubData %>%
+  unite(c(day, month, year), col = "dmY", sep = " ")
+
+#save in date format
+SubData$dmY <-as.POSIXct(SubData$dmY, format ="%d%m%Y", tz="UTC")
+
+Sub_Data_Pivot <- SubData %>%
+  tidyr::pivot_longer(
+    cols = c("sub1_avg","sub2_avg","sub3_avg"),
+    names_to = "submeters", values_to = "values"
+  )
+```
+
+```{r}
+Acitve_and_Reactive_Data <- Data %>%
+  group_by(year=year(Datetime),
+           month=month(Datetime),
+           day=day(Datetime),
+           hour=hour(Datetime)) %>%
+  summarise(Global_APower = mean(Global_active_power, na.rm = TRUE),
+            Global_RPower = mean(Global_reactive_power, na.rm = TRUE)) %>% 
+  ungroup()
+
+#merge the  year,month,day,hour columns to one column so that comparison(later can be made)
+Acitve_and_Reactive_Data <- Acitve_and_Reactive_Data %>%
+  unite(c(day, month, year), col = "dmY", sep = " ")
+
+#save in date format
+Acitve_and_Reactive_Data$dmY <-as.POSIXct(Acitve_and_Reactive_Data$dmY,
+                                          format ="%d%m%Y", tz="UTC")
+
+Acitve_and_Reactive_Pivot <- Acitve_and_Reactive_Data %>%
+  tidyr::pivot_longer(
+    cols = c("Global_APower","Global_RPower"),
+    names_to = "global_power", values_to = "values"
+  )
+```
+
+```{r}
+Voltage_Data <- Data %>%
+  group_by(year=year(Datetime),
+           month=month(Datetime),
+           day=day(Datetime),
+           hour=hour(Datetime)) %>%
+  summarise(voltage = mean(Voltage, na.rm = TRUE)) %>% 
+  ungroup()
+
+#merge the  year,month,day,hour columns to one column so that comparison(later can be made)
+Voltage_Data <- Voltage_Data %>%
+  unite(c(day, month, year), col = "dmY", sep = " ")
+
+#save in date format
+Voltage_Data$dmY <-as.POSIXct(Voltage_Data$dmY,
+                                          format ="%d%m%Y", tz="UTC")
+
+Voltage_Pivot <- Voltage_Data %>%
+  tidyr::pivot_longer(
+    cols = c("voltage"),
+    names_to = "voltage", values_to = "values"
+  )
+```
+
+```{r}
+Global_Intensity_Data <- Data %>%
+  group_by(year=year(Datetime),
+           month=month(Datetime),
+           day=day(Datetime),
+           hour=hour(Datetime)) %>%
+  summarise(intensity = mean(Global_intensity, na.rm = TRUE)) %>% 
+  ungroup()
+
+#merge the  year,month,day,hour columns to one column so that comparison(later can be made)
+Global_Intensity_Data <- Global_Intensity_Data %>%
+  unite(c(day, month, year), col = "dmY", sep = " ")
+
+#save in date format
+Global_Intensity_Data$dmY <-as.POSIXct(Global_Intensity_Data$dmY,
+                                          format ="%d%m%Y", tz="UTC")
+
+Global_Intensity_Pivot <- Global_Intensity_Data %>%
+  tidyr::pivot_longer(
+    cols = c("intensity"),
+    names_to = "intensity", values_to = "values"
+  )
+```
+
+```{r}
+# create df with Sub meter info and the week & month the data occured at
+
+SubDataMonth <- Data %>%
+  group_by(year=year(Datetime),
+           month=month(Datetime),
+           day=day(Datetime)) %>%
+  summarise(sub1_avg = mean(Sub_metering_1, na.rm = TRUE),
+            sub2_avg = mean(Sub_metering_2, na.rm = TRUE),
+            sub3_avg = mean(Sub_metering_3, na.rm = TRUE),) %>% 
+  ungroup()
+
+#merge the  year,month,day,hour columns to one column so that comparison(later can be made)
+SubDataMonth <- SubDataMonth %>%
+  unite(c(day, month, year), col = "dmY", sep = " ")
+
+#save in date format
+SubDataMonth$dmY <-as.POSIXct(SubDataMonth$dmY, format ="%d%m%Y", tz="UTC")
+
+#create sepperate year column
+SubDataMonth$year <- year(SubDataMonth$dmY)
+
+#create sepperate month column
+SubDataMonth$month <- month(SubDataMonth$dmY)
+
+#create sepperate week column
+SubDataMonth$week <- week(SubDataMonth$dmY)
+
+#create sepperate weekday column
+SubDataMonth$weekday <- wday(SubDataMonth$dmY)
+
+#create sepperate day column
+SubDataMonth$day <- day(SubDataMonth$dmY)
+
+
+Sub_Data_M_Pivot <- SubDataMonth %>%
+  tidyr::pivot_longer(
+    cols = c("sub1_avg","sub2_avg","sub3_avg"),
+    names_to = "submeters", values_to = "values"
+    )
+
+```
+
+```{r}
+# create df with Sub meter info and the week the data occured at
+
+Sub_Data_Week <- Data %>%
+  group_by(year=year(Datetime),
+           month=month(Datetime),
+           day=day(Datetime)) %>%
+  summarise(sub1_avg = mean(Sub_metering_1, na.rm = TRUE),
+            sub2_avg = mean(Sub_metering_2, na.rm = TRUE),
+            sub3_avg = mean(Sub_metering_3, na.rm = TRUE),) %>%
+  ungroup()
+
+#merge the  year,month,day,hour columns to one column so that comparison(later can be made)
+Sub_Data_Week <- Sub_Data_Week %>%
+  unite(c(day, month, year), col = "dmY", sep = " ")
+
+#save in date format
+Sub_Data_Week$dmY <-as.POSIXct(Sub_Data_Week$dmY, format ="%d%m%Y", tz="UTC")
+
+#create sepperate year column
+Sub_Data_Week$year <- year(Sub_Data_Week$dmY)
+
+#create sepperate month column
+Sub_Data_Week$month <- month(Sub_Data_Week$dmY)
+
+#create sepperate week column
+Sub_Data_Week$week <- week(Sub_Data_Week$dmY)
+
+#create sepperate weekday column
+Sub_Data_Week$weekday <- wday(Sub_Data_Week$dmY)
+
+#create sepperate day column
+Sub_Data_Week$day <- day(Sub_Data_Week$dmY)
+
+
+Sub_Data_W_Pivot <- Sub_Data_Week %>%
+  tidyr::pivot_longer(
+    cols = c("sub1_avg","sub2_avg","sub3_avg"),
+    names_to = "submeters", values_to = "values"
+    )
+
+```
+
+
+
+```{r}
+Sub_Data_Cum <- Data %>%
+  group_by(year=year(Datetime),
+           month=month(Datetime),
+           day=day(Datetime),) %>%
+  
+  summarise(sub1_avg = mean(Sub_metering_1, na.rm = TRUE),
+            sub2_avg = mean(Sub_metering_2, na.rm = TRUE),
+            sub3_avg = mean(Sub_metering_3, na.rm = TRUE),) %>%
+  mutate(sub1_avg_cum = cumsum(sub1_avg),
+         sub2_avg_cum = cumsum(sub2_avg),
+         sub3_avg_cum = cumsum(sub3_avg)) %>%
+           ungroup()
+
+#Sub_Data_Cum %>% group_by(year) %>%
+#  mutate(day2= seq_along(year))
+
+# Sub_Data_Cum$day2 <- Sub_Data_Cum %>% group_by(
+#   year=year(Datetime),
+#   month=month(Datetime),
+#   day=day(Datetime)
+#   ) %>% mutate(day=seq_along(year))
+
+#merge the  year,month,day,hour columns to one column so that comparison(later can be made)
+Sub_Data_Cum <- Sub_Data_Cum %>%
+  unite(c(day, month, year), col = "dmY", sep = " ")
+
+#save in date format
+Sub_Data_Cum$dmY <-as.POSIXct(Sub_Data_Cum$dmY, format ="%d%m%Y", tz="UTC")
+
+#create sepperate year column
+Sub_Data_Cum$year <- year(Sub_Data_Cum$dmY)
+
+#create sepperate month column
+Sub_Data_Cum$month <- month(Sub_Data_Cum$dmY)
+
+#create sepperate day column
+Sub_Data_Cum$day <- day(Sub_Data_Cum$dmY)
+
+Sub_Data_Cum_Pivot <- Sub_Data_Cum %>%
+  tidyr::pivot_longer(
+    cols = c("sub1_avg_cum","sub2_avg_cum","sub3_avg_cum"),
+    names_to = "submeterscum", values_to = "values"
+  )
+
+```
+
+```{r}
+# ui ----------------------------------------------------------------------
+ui <- dashboardPage(  dashboardHeader(),dashboardSidebar(
+  
+    sliderInput(
+      inputId = "slider_days_predicted",
+      label = "Choose the number of days you would like to have predicted",
+      min = 1, max = 365, value = 25
+      ),
+    
+    sliderInput(
+      inputId = "choose_day",
+      label = "Choose Day",
+      min = as.Date("16-12-2006","%d-%m-%Y"),
+      max = as.Date("26-11-2010","%d-%m-%Y"),
+      value = as.Date("16-12-2006","%d-%m-%Y")
+      ),
+    
+    sliderInput(
+      inputId = "choose_year",
+      label = "Choose Year",
+      min = 2006, max = 2010, value = 2007
+    ),
+    
+    sliderInput(
+      inputId = "choose_month",
+      label = "Choose Month",
+      min = 1, max = 12, value = 12,
+    ),
+    
+    sliderInput(
+      inputId = "choose_week",
+      label = "Choose Week",
+      min = 1, max = 52, value = 52,
+    )
+    )
+    
+    ,dashboardBody(
+    box(plotOutput(outputId = "plot1")),
+    
+    box(plotOutput(outputId = "plot2")),
+    
+    box(plotOutput(outputId = "plot3")),
+    
+    box(plotOutput(outputId = "plot4")),
+    
+    box(plotOutput(outputId = "plot5")),
+    
+    box(plotOutput(outputId = "plot6")),
+    
+    box(plotOutput(outputId = "plot7")),
+    
+    box(plotOutput(outputId = "plot8"))
+    
+    )
+  )
+
+# server ------------------------------------------------------------------
+server <- function(input, output) {
+  
+  output$plot1 <- renderPlot({
+    forecast_day_data <- forecast(linearmodel,
+                                  h=input$slider_days_predicted)
+    autoplot(forecast_day_data, xlab="Time")
+    })
+  
+  output$plot2 <- renderPlot({
+  
+    Acitve_and_Reactive_Pivot %>%
+      filter(dmY == input$choose_day) %>%
+      ggplot(aes(x=hour,y=values, col = global_power))+
+        geom_step()
+  })
+  
+  output$plot3 <- renderPlot({
+  
+    Voltage_Pivot %>%
+      filter(dmY == input$choose_day) %>%
+      ggplot(aes(x=hour,y=values, col = voltage))+
+        geom_step()
+  })
+  
+  output$plot4 <- renderPlot({
+    
+    Sub_Data_Pivot %>%
+      filter(dmY == input$choose_day) %>%
+      ggplot(aes(x=hour, y=values, col = submeters))+
+        geom_step()
+  })
+  
+  output$plot5 <- renderPlot({
+    
+    Global_Intensity_Pivot %>%
+      filter(dmY == input$choose_day) %>%
+      ggplot(aes(x=hour, y=values, col = intensity))+
+        geom_step()
+  })
+  
+  output$plot6 <- renderPlot({
+    Sub_Data_M_Pivot %>%
+      filter(year == input$choose_year & month== input$choose_month) %>%
+      ggplot(aes(x=day, y=values, col =submeters))+
+      geom_line()
+  })
+  
+  output$plot7 <- renderPlot({
+    Sub_Data_W_Pivot %>%
+      filter(year == input$choose_year & week== input$choose_week) %>%
+      ggplot(aes(x=weekday, y=values, col =submeters))+
+      geom_line()
+  })
+  
+  output$plot8 <- renderPlot ({
+    Sub_Data_Cum_Pivot %>%
+      filter(year== input$choose_year) %>%
+      ggplot(aes(x=day, y=values, col =submeterscum))+
+      geom_line()
+  })
+  
+}
+
+shinyApp(ui, server)
+
+```
+
+```{r}
+Sub_Data_Cum_Pivot %>%
+      filter(year== 2008) %>%
+      ggplot(aes(x=day, y=values, col =submeterscum))+
+      geom_line()
+```
+
+
+
+```{r}
+Sub_Data_WK_Pivot %>%
+  filter(year == 2009 & month== 12) %>%
+  ggplot(aes(x=day, y=values, col =submeters))+
+  geom_line()
+```
+
+
+
+```{r}
+ Sub_Data_Day_Pivot%>%
+  filter(dmY == as.Date("16-12-2007","%d-%m-%Y")) %>%
+  ggplot(aes(hour,sub1_avg + sub1_avg))+
+  geom_step()
+```
+
+
+
+
+
